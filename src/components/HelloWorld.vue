@@ -19,13 +19,13 @@
           rounded
           placeholder="esix rating:s"
           prepend-inner-icon="mdi-magnify"
-          :disabled="searchInitiated"
+          :disabled="status !== statusEnum.READY"
         ></v-text-field>
       </v-col>
     </v-row>
-    <v-row v-if="!searchInitiated" no-gutters align="center" justify="center" class="text-center">
+    <v-row v-if="status === statusEnum.READY" no-gutters align="center" justify="center" class="text-center">
       <v-col cols="12">
-        <v-btn depressed color="primary" :loading="searching" class="mb-2" @click="initSearch">Search</v-btn>
+        <v-btn depressed color="primary" class="mb-2" @click="initSearch(null)">Search</v-btn>
         <div class="text-caption"><a href="https://e621.net/help/cheatsheet" target="_blank">Search help</a></div>
       </v-col>
       <v-col cols="auto">
@@ -39,25 +39,56 @@
           rounded
           height="10"
           :value="progressValue"
-          :active="searching || downloading"
-          :indeterminate="searching"
+          :active="showProgress"
+          :indeterminate="progressIndeterminate"
           :query="true"
         ></v-progress-linear>
+        <div>{{ statusText }}</div>
       </v-col>
-      <v-col v-if="!searching" cols="12">
+      <v-col v-if="status === statusEnum.AWAITING_USER_INPUT" cols="12">
         <v-card flat tile color="transparent">
-          <v-card-text class="text-subtitle-1 white--text">
-            <div>Found {{ fileCount.posts.total }} posts and {{ pools.length }} pools</div>
-            <div class="success--text">{{ fileCount.posts.whitelisted }} ready to download</div>
-            <div>{{ fileCount.posts.blacklisted }} blacklisted</div>
-            <div>Found {{ fileCount.pools.total }} pool posts</div>
-            <div class="success--text">{{ fileCount.pools.whitelisted }} ready to download</div>
-            <div>{{ fileCount.pools.blacklisted }} blacklisted</div>
+          <v-card-text class="text-h6 white--text">
+            <div class="text-subtitle-1 font-weight-regular">Found {{ fileCount.posts.total }} posts</div>
+            <span class="mr-2 success--text">
+              <v-icon color="success">mdi-check</v-icon>
+              {{ fileCount.posts.whitelisted }}
+            </span>
+            <span class="error--text">
+              <v-icon color="error">mdi-close</v-icon>
+              {{ fileCount.posts.blacklisted }}
+            </span>
+          </v-card-text>
+          <v-card-text class="text-h6 white--text">
+            <div class="text-subtitle-1 font-weight-regular">Detected {{ fileCount.pools.total }} posts in {{ pools.length }} pools</div>
+            <span class="mr-2 success--text">
+              <v-icon color="success">mdi-check</v-icon>
+              {{ fileCount.pools.whitelisted }}
+            </span>
+            <span class="error--text">
+              <v-icon color="error">mdi-close</v-icon>
+              {{ fileCount.pools.blacklisted }}
+            </span>
+          </v-card-text>
+          <v-card-text class="text-h6 white--text">
+            {{ fileCount.posts.whitelisted + fileCount.pools.whitelisted }} files will be downloaded
           </v-card-text>
           <v-card-actions>
             <v-spacer></v-spacer>
-            <v-btn text color="primary" @click="finSearch">Abort</v-btn>
+            <v-btn text color="primary" @click="restart">Abort</v-btn>
             <v-btn depressed color="primary" @click="download">Download ({{ downloadSize }} MB)</v-btn>
+            <v-spacer></v-spacer>
+          </v-card-actions>
+        </v-card>
+      </v-col>
+      <v-col v-else-if="status === statusEnum.DONE" cols="12">
+        <v-card flat tile color="transparent">
+          <v-card-text class="text-h6 white--text">
+            Download complete.
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn text color="primary" @click="restart">Discard</v-btn>
+            <v-btn depressed color="primary" @click="save">Save</v-btn>
             <v-spacer></v-spacer>
           </v-card-actions>
         </v-card>
@@ -71,28 +102,70 @@ import Pogsix from '@/components/Pogsix.vue'
 import { saveAs } from 'file-saver'
 import { zip } from 'fflate'
 
+const Status = Object.freeze({
+  READY: 0,
+  RETRIEVING_POSTS: 1,
+  RETRIEVING_POOLS: 2,
+  RETRIEVING_POOL_POSTS: 3,
+  AWAITING_USER_INPUT: 4,
+  DOWNLOADING: 5,
+  ZIPPING: 6,
+  DONE: 7
+})
+
 export default {
   name: 'HelloWorld',
   components: {
     Pogsix
   },
   data: () => ({
+    statusEnum: Status,
+    status: Status.READY,
     postsPerPage: 75, // There is a hard limit of 320 posts per request; as per API docs
     search: 'renamon fav:RaRa young',
-    searchInitiated: false,
-    searching: false,
     searchResults: [],
     pendingApiRequests: 0,
-    downloading: false,
     filesDownloaded: 0,
     files: [],
     filesPools: [],
     pools: [],
+    zipFile: null,
     // Preferences
     globalBlacklistOff: true,
     downloadPools: true
   }),
   computed: {
+    statusText () {
+      switch (this.status) {
+        case Status.RETRIEVING_POSTS: return this.searchResults.length > 0 ? `Searching (${this.searchResults.length} posts found)...` : 'Searching...'
+        case Status.RETRIEVING_POOLS: return `Detecting pools...`
+        case Status.RETRIEVING_POOL_POSTS: return `Scanning pools (${this.pendingApiRequests} left)...`
+        case Status.DOWNLOADING: return `Downloading post ${this.filesDownloaded} of ${this.fileCount.posts.whitelisted + this.fileCount.pools.whitelisted}...`
+        default: return ''
+      }
+    },
+    showProgress () {
+      switch (this.status) {
+        case Status.RETRIEVING_POSTS:
+        case Status.RETRIEVING_POOLS:
+        case Status.RETRIEVING_POOL_POSTS:
+        case Status.DOWNLOADING:
+        case Status.ZIPPING:
+        case Status.DONE:
+          return true
+        default: return false
+      }
+    },
+    progressIndeterminate () {
+      switch (this.status) {
+        case Status.RETRIEVING_POSTS:
+        case Status.RETRIEVING_POOLS:
+        case Status.RETRIEVING_POOL_POSTS:
+        case Status.ZIPPING:
+          return true
+        default: return false
+      }
+    },
     progressValue () {
       return (100 * this.filesDownloaded) / (this.fileCount.posts.whitelisted + this.fileCount.pools.whitelisted)
     },
@@ -140,13 +213,8 @@ export default {
     }
   },
   methods: {
-    initSearch () {
-      this.searchInitiated = true
-      this.searching = true
-      this.searchResults = []
-      this.test(null)
-    },
-    test (fromID) {
+    initSearch (fromID) {
+      this.status = Status.RETRIEVING_POSTS
       this.axios.get('https://e621.net/posts.json', {
         params: {
           tags: this.search,
@@ -157,7 +225,7 @@ export default {
         console.log(response.data)
         this.searchResults = [...this.searchResults, ...response.data.posts]
         if (response.data.posts.length === 320) {
-          this.test(response.data.posts[response.data.posts.length - 1].id)
+          this.initSearch(response.data.posts[response.data.posts.length - 1].id)
         } else {
           console.log(`Found ${this.searchResults.length} posts.`)
           console.log(this.searchResults)
@@ -173,6 +241,7 @@ export default {
       return `https://static1.e621.net/data/${urlPathP1}/${urlPathP2}/${fileHash}.${fileExtension}`
     },
     prepare () {
+      this.status = Status.RETRIEVING_POOLS
       const poolIds = []
       for (let i = 0; i < this.searchResults.length; i++) {
         const fileUrl = this.searchResults[i].file.url
@@ -190,6 +259,7 @@ export default {
           'search[id]': poolIds.join(',')
         }
       }).then(response => {
+        this.status = Status.RETRIEVING_POOL_POSTS
         response.data.forEach(entry => {
           this.pendingApiRequests++
           this.axios.get('https://e621.net/posts.json', {
@@ -221,13 +291,13 @@ export default {
       const completionInterval = setInterval(() => {
         if (this.pendingApiRequests === 0) {
           clearInterval(completionInterval)
-          this.searching = false
+          this.status = Status.AWAITING_USER_INPUT
           console.log(`${this.searchResultsFiltered.length} files ready to download, totalling ${this.downloadSize} MB. ${this.searchResults.length - this.searchResultsFiltered.length} posts blacklisted.`)
         }
       }, 1000)
     },
     download () {
-      this.downloading = true
+      this.status = Status.DOWNLOADING
       let requestsQueued = 0
 
       // Download posts
@@ -277,11 +347,13 @@ export default {
           // console.log(`Downloaded ${filesDownloaded}, skipped ${filesSkipped} files.`)
 
           clearInterval(completionInterval)
-          this.save()
+          this.generateZipArchive()
         }
       }, 1000)
     },
-    save () {
+    generateZipArchive () {
+      this.status = Status.ZIPPING
+
       let dirName = this.search.split(' ')[0] // first tag is the main directory name
       if (dirName.includes(':')) {
         const tags = dirName.split(':')
@@ -324,12 +396,23 @@ export default {
       zip({ [dirName]: obj }, {
         level: 0
       }, (err, data) => {
-        saveAs(new Blob([data]), 'e621_grabber.zip')
+        this.status = Status.DONE
+        this.zipFile = data
+        this.save()
       })
     },
-    finSearch () {
-      this.searchInitiated = false
+    save () {
+      saveAs(new Blob([this.zipFile]), 'e621_grabber.zip')
+    },
+    restart () {
+      this.status = Status.READY
+      this.pendingApiRequests = 0
+      this.searchResults = []
+      this.pools = []
+      this.filesDownloaded = 0
       this.files = []
+      this.filesPools = []
+      this.zipFile = null
     }
   }
 }
