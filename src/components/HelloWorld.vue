@@ -24,13 +24,15 @@
       </v-col>
     </v-row>
     <v-row v-if="status === statusEnum.READY" no-gutters align="center" justify="center" class="text-center">
-      <v-col cols="12">
+      <v-col cols="12" class="mb-5">
         <v-btn depressed color="primary" class="mb-2" @click="initSearch(null)">Search</v-btn>
         <div class="text-caption"><a href="https://e621.net/help/cheatsheet" target="_blank">Search help</a></div>
       </v-col>
       <v-col cols="auto">
         <v-checkbox v-model="globalBlacklistOff" label="Bypass Global Blacklist"></v-checkbox>
-        <v-checkbox v-model="downloadPools" label="Download pools"></v-checkbox>
+      </v-col>
+      <v-col cols="auto">
+        <v-checkbox v-model="downloadPools" label="Download Pools"></v-checkbox>
       </v-col>
     </v-row>
     <v-row v-else no-gutters align="center" justify="center" class="text-center">
@@ -58,7 +60,7 @@
               {{ fileCount.posts.blacklisted }}
             </span>
           </v-card-text>
-          <v-card-text class="text-h6 white--text">
+          <v-card-text v-if="downloadPools" class="text-h6 white--text">
             <div class="text-subtitle-1 font-weight-regular">Detected {{ fileCount.pools.total }} posts in {{ pools.length }} pools</div>
             <span class="mr-2 success--text">
               <v-icon color="success">mdi-check</v-icon>
@@ -70,12 +72,13 @@
             </span>
           </v-card-text>
           <v-card-text class="text-h6 white--text">
-            {{ fileCount.posts.whitelisted + fileCount.pools.whitelisted }} files will be downloaded
+            {{ fileCount.posts.whitelisted + fileCount.pools.whitelisted }} files ({{ downloadSize }} MB)<br/><span class="text-subtitle-1">will be downloaded.</span>
           </v-card-text>
+          <v-spacer class="my-5"></v-spacer>
           <v-card-actions>
             <v-spacer></v-spacer>
             <v-btn text color="primary" @click="restart">Abort</v-btn>
-            <v-btn depressed color="primary" @click="download">Download ({{ downloadSize }} MB)</v-btn>
+            <v-btn depressed color="primary" @click="download">Download</v-btn>
             <v-spacer></v-spacer>
           </v-card-actions>
         </v-card>
@@ -88,7 +91,7 @@
           <v-card-actions>
             <v-spacer></v-spacer>
             <v-btn text color="primary" @click="restart">Discard</v-btn>
-            <v-btn depressed color="primary" @click="save">Save</v-btn>
+            <v-btn depressed color="primary" @click="generateZipArchive">Save</v-btn>
             <v-spacer></v-spacer>
           </v-card-actions>
         </v-card>
@@ -99,9 +102,11 @@
 
 <script>
 import Pogsix from '@/components/Pogsix.vue'
+import streamSaver from 'streamsaver'
+import '@/plugins/zip-stream.js'
 import { saveAs } from 'file-saver'
-import { zip } from 'fflate'
 
+const CORS_PROXY = 'https://grabber-cors-anywhere.herokuapp.com/'
 const Status = Object.freeze({
   READY: 0,
   RETRIEVING_POSTS: 1,
@@ -110,7 +115,8 @@ const Status = Object.freeze({
   AWAITING_USER_INPUT: 4,
   DOWNLOADING: 5,
   ZIPPING: 6,
-  DONE: 7
+  SAVING: 7,
+  DONE: 8
 })
 
 export default {
@@ -121,7 +127,7 @@ export default {
   data: () => ({
     statusEnum: Status,
     status: Status.READY,
-    postsPerPage: 75, // There is a hard limit of 320 posts per request; as per API docs
+    postsPerPage: 320, // There is a hard limit of 320 posts per request; as per API docs
     search: 'renamon fav:RaRa young',
     searchResults: [],
     pendingApiRequests: 0,
@@ -129,7 +135,6 @@ export default {
     files: [],
     filesPools: [],
     pools: [],
-    zipFile: null,
     // Preferences
     globalBlacklistOff: true,
     downloadPools: true
@@ -141,6 +146,8 @@ export default {
         case Status.RETRIEVING_POOLS: return `Detecting pools...`
         case Status.RETRIEVING_POOL_POSTS: return `Scanning pools (${this.pendingApiRequests} left)...`
         case Status.DOWNLOADING: return `Downloading post ${this.filesDownloaded} of ${this.fileCount.posts.whitelisted + this.fileCount.pools.whitelisted}...`
+        case Status.ZIPPING: return 'Zipping...'
+        case Status.SAVING: return 'Saving ZIP file...'
         default: return ''
       }
     },
@@ -151,6 +158,7 @@ export default {
         case Status.RETRIEVING_POOL_POSTS:
         case Status.DOWNLOADING:
         case Status.ZIPPING:
+        case Status.SAVING:
         case Status.DONE:
           return true
         default: return false
@@ -162,6 +170,7 @@ export default {
         case Status.RETRIEVING_POOLS:
         case Status.RETRIEVING_POOL_POSTS:
         case Status.ZIPPING:
+        case Status.SAVING:
           return true
         default: return false
       }
@@ -229,7 +238,16 @@ export default {
         } else {
           console.log(`Found ${this.searchResults.length} posts.`)
           console.log(this.searchResults)
-          this.prepare()
+
+          for (let i = 0; i < this.searchResults.length; i++) {
+            const fileUrl = this.searchResults[i].file.url
+            if (!fileUrl) {
+              this.$set(this.searchResults[i].file, 'constructedUrl', this.constructSourceUrl(this.searchResults[i]))
+            }
+          }
+          
+          if (this.downloadPools) this.prepare()
+          else this.status = Status.AWAITING_USER_INPUT
         }
       })
     },
@@ -242,15 +260,11 @@ export default {
     },
     prepare () {
       this.status = Status.RETRIEVING_POOLS
+
       const poolIds = []
       for (let i = 0; i < this.searchResults.length; i++) {
-        const fileUrl = this.searchResults[i].file.url
         const pools = this.searchResults[i].pools
         pools.forEach(id => poolIds.indexOf(id) === -1 && poolIds.push(id))
-
-        if (!fileUrl) {
-          this.$set(this.searchResults[i].file, 'constructedUrl', this.constructSourceUrl(this.searchResults[i]))
-        }
       }
 
       this.pendingApiRequests++
@@ -262,7 +276,7 @@ export default {
         this.status = Status.RETRIEVING_POOL_POSTS
         response.data.forEach(entry => {
           this.pendingApiRequests++
-          this.axios.get('https://e621.net/posts.json', {
+          this.axios.get(CORS_PROXY + 'https://e621.net/posts.json', {
             params: {
               tags: `pool:${entry.id}`,
               limit: 320
@@ -306,7 +320,8 @@ export default {
         const constructedUrl = this.searchResultsFiltered[i].file.constructedUrl
         requestsQueued++
 
-        this.axios.get(`https://grabber-cors-anywhere.herokuapp.com/${fileUrl || constructedUrl}`, {
+        // TODO: not more than 5 concurrent requests
+        this.axios.get(`${CORS_PROXY}${fileUrl || constructedUrl}`, {
           responseType: 'arraybuffer'
         }).then(response => {
           this.files.push({ post: this.searchResultsFiltered[i], data: new Uint8Array(response.data) })
@@ -326,7 +341,8 @@ export default {
           const constructedUrl = this.filesPools[k].posts[l].file.constructedUrl
           requestsQueued++
 
-          this.axios.get(`https://grabber-cors-anywhere.herokuapp.com/${fileUrl || constructedUrl}`, {
+          // TODO: not more than 5 concurrent requests
+          this.axios.get(`${CORS_PROXY}${fileUrl || constructedUrl}`, {
             responseType: 'arraybuffer'
           }).then(response => {
             this.$set(this.filesPools[k].posts[l].file, 'binaryData', new Uint8Array(response.data))
@@ -371,35 +387,55 @@ export default {
           // default: dirName = tags[1]
         }
       }
-      const obj = {}
 
-      for (const file of this.files) {
-        const fileHash = file.post.file.md5
-        const fileExtension = file.post.file.ext
-        const fileName = `${fileHash}.${fileExtension}`
+      streamSaver.mitm = '/streamsaver/mitm.html?version=' + streamSaver.version.full
+      const fileStream = streamSaver.createWriteStream('e621_grabber.zip')
+      const files = this.files
+      const filesPools = this.filesPools
 
-        obj[fileName] = file.data
-      }
+      const readableZipStream = window.ZIP({
+        start (ctrl) {
+          ctrl.enqueue({ name: dirName, directory: true})
 
-      // Pools
-      this.filesPools.forEach(pool => {
-        const poolObj = {}
-        for (const file of pool.posts) {
-          const fileHash = file.file.md5
-          const fileExtension = file.file.ext
-          const fileName = `${fileHash}.${fileExtension}`
-          poolObj[fileName] = file.file.binaryData
+          // Posts
+          for (const file of files) {
+            const fileHash = file.post.file.md5
+            const fileExtension = file.post.file.ext
+            const fileName = `${fileHash}.${fileExtension}`
+
+            const file1 = new File([file.data], `${dirName}/${fileName}`)
+            ctrl.enqueue(file1)
+          }
+
+          // Pools
+          filesPools.forEach(pool => {
+            const poolDirName = `[${pool.pool.id}] ${pool.pool.name.replaceAll('_', ' ')}`
+            ctrl.enqueue({ name: `${dirName}/${poolDirName}`, directory: true})
+
+            for (const file of pool.posts) {
+              const fileId = file.id
+              const fileExtension = file.file.ext
+              const fileName = `${pool.pool.post_ids.indexOf(fileId)+1}.${fileExtension}`
+              // const fileHash = file.file.md5
+              // const fileName = `${fileHash}.${fileExtension}`
+
+              const file2 = new File([file.file.binaryData], `${dirName}/${poolDirName}/${fileName}`)
+              ctrl.enqueue(file2)
+            }
+          })
+
+          ctrl.close()
         }
-        obj[`(${pool.pool.id}) ${pool.pool.name.replaceAll('_', ' ')}`] = poolObj
       })
 
-      zip({ [dirName]: obj }, {
-        level: 0
-      }, (err, data) => {
-        this.status = Status.DONE
-        this.zipFile = data
-        this.save()
-      })
+      // more optimized
+      this.status = Status.SAVING
+      if (window.WritableStream && readableZipStream.pipeTo) {
+        return readableZipStream.pipeTo(fileStream).then(() => {
+          this.status = Status.DONE
+          console.log('StreamSaver.js: done writing.')
+        })
+      }
     },
     save () {
       saveAs(new Blob([this.zipFile]), 'e621_grabber.zip')
@@ -412,7 +448,6 @@ export default {
       this.filesDownloaded = 0
       this.files = []
       this.filesPools = []
-      this.zipFile = null
     }
   }
 }
