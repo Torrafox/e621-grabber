@@ -10,11 +10,9 @@
           e621-Grabber
         </h1>
       </div>
-
       <v-spacer></v-spacer>
-
       <v-btn
-        href="https://github.com/Torrafox/e621-grabber"
+        :href='Urls.REPO'
         target="_blank"
         text
       >
@@ -24,32 +22,32 @@
     </v-app-bar>
 
     <v-main>
-      <HelloWorld/>
+      <Core />
     </v-main>
     <v-footer app padless>
       <v-card flat tile max-width="600" color="transparent" class="text-center mx-auto">
         <v-card-text>
-          This project is not affiliated, associated, authorized, endorsed by, or in any way officially connected with <a :href="e621Url" target="_blank">e621.net</a>, or any of its subsidiaries or its affiliates.
-          <br/>pog621 by <a href="https://e621.net/users/584293" target="_blank">Redcrystal</a>
+          This project is not affiliated, associated, authorized, endorsed by, or in any way officially connected with <a :href="Urls.E621" target="_blank">e621.net</a>, or any of its subsidiaries or its affiliates.
+          <br/>pog621 by <a :href="Urls.E621_REDCRYSTAL" target="_blank">Redcrystal</a>
         </v-card-text>
         <v-divider></v-divider>
-        <v-card-text>Copyright © 2021 <a :href="ownerUrl" target="_blank">Torrafox</a></v-card-text>
+        <v-card-text>Copyright © 2021 <a :href="Urls.AUTHOR" target="_blank">Torrafox</a></v-card-text>
       </v-card>
     </v-footer>
   </v-app>
 </template>
 
 <script>
-import HelloWorld from './components/HelloWorld'
+import Core from '@/components/Core.vue'
+import { Urls } from '@/constants.js'
 
 export default {
   name: 'App',
   components: {
-    HelloWorld
+    Core
   },
   data: () => ({
-    ownerUrl: 'https://github.com/Torrafox',
-    e621Url: 'https://e621.net'
+    Urls
   }),
   computed: {
     theme () {
