@@ -120,6 +120,7 @@
 <script>
 import Pogsix from '@/components/Pogsix.vue'
 import streamSaver from 'streamsaver'
+import * as pony from 'web-streams-polyfill/ponyfill'
 import '@/plugins/zip-stream.js'
 import { Urls, Status, LocalStorage, Timer } from '@/constants.js'
 
@@ -484,9 +485,9 @@ export default {
 
       if (zipSizeLimitExceeded) this.generateZipFile(files, filesPools, zipNumber+1)
 
-      // more optimized
       this.status = Status.SAVING
       if (window.WritableStream && readableZipStream.pipeTo) {
+        // more optimized
         return readableZipStream.pipeTo(fileStream).catch(err => {
           this.status = Status.DONE
           console.log(`StreamSaver.js: something went wrong...`)
@@ -495,6 +496,20 @@ export default {
           this.status = Status.DONE
           console.log(`StreamSaver.js: done writing ${zipFileName}.`)
         })
+      } else {
+        // less optimized
+        const writer = fileStream.getWriter()
+        const reader = readableZipStream.getReader()
+        const pump = () => reader.read()
+          .then(res => {
+            if (res.done) {
+              this.status = Status.DONE
+              writer.close()
+            } else {
+              writer.write(res.value).then(pump)
+            }
+          })
+        pump()
       }
     },
     restart () {
@@ -508,6 +523,13 @@ export default {
     }
   },
   created () {
+    // Ponyfill for firefox
+    if (!window.WritableStream) {
+      streamSaver.WritableStream = pony.WritableStream
+      window.WritableStream = pony.WritableStream
+    }
+
+    // Read preferences from localStorage
     const sfwMode = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.sfwmode'))
     const globalBlacklistOff = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.globalblacklistoff'))
     const downloadPools = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.downloadpools'))
