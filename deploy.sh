@@ -13,6 +13,8 @@ cd dist
 # echo 'www.example.com' > CNAME
 
 git init
+git config --local user.email 'torrafox@gmail.com'
+git config --local user.name 'Torrafox'
 git add -A
 git commit -m 'deploy'
 
