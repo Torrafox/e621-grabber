@@ -417,7 +417,7 @@ export default {
       }, 1000)
     },
     generateZipFile (_files, _filesPools, zipNumber) {
-      streamSaver.mitm = '/streamsaver/mitm.html?version=' + streamSaver.version.full
+      streamSaver.mitm = process.env.BASE_URL + 'streamsaver/mitm.html?version=' + streamSaver.version.full
       const zipFileName = `e621_grabber_${zipNumber}.zip`
       const dirName = this.mainDirName
       const fileStream = streamSaver.createWriteStream(zipFileName)
