@@ -1,6 +1,7 @@
 export const Urls = Object.freeze({
   CORS_PROXY: 'https://grabber-cors-anywhere.herokuapp.com/',
   E621: 'https://e621.net/',
+  get E621_HELP () { return this.E621 + 'help/cheatsheet' },
   get E621_POSTS () { return this.E621 + 'posts.json' },
   get E621_POOLS () { return this.E621 + 'pools.json' },
   E621_STATIC: 'https://static1.e621.net/data/',
@@ -19,6 +20,11 @@ export const Status = Object.freeze({
   ZIPPING: 6,
   SAVING: 7,
   DONE: 8
+})
+
+export const LocalStorage = Object.freeze({
+  MAIN: 'e621-grabber',
+  get SETTINGS () { return this.MAIN + '.settings' }
 })
 
 export const Timer = ms => new Promise(res => setTimeout(res, ms))

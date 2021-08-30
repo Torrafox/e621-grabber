@@ -6,8 +6,8 @@
       </v-col>
       <v-col class="mb-4">
         <p class="subheading font-weight-regular">
-          Bulk download your favorite images and videos.
-          <br/>No need to compile or install anything on your device.
+          Bulk download your favorite images and videos through your browser.
+          <br/>No software installation needed.
         </p>
       </v-col>
       <v-col cols="12">
@@ -17,25 +17,28 @@
           clearable
           outlined
           rounded
+          autocomplete="off"
           placeholder="fav:username esix order:score"
           prepend-inner-icon="mdi-magnify"
-          :disabled="status !== statusEnum.READY"
+          :disabled="status !== Status.READY"
+          @keyup.enter.prevent="searchPosts(null)"
         ></v-text-field>
       </v-col>
     </v-row>
-    <v-row v-if="status === statusEnum.READY" no-gutters align="center" justify="center" class="text-center">
-      <v-col cols="12" class="mb-5">
-        <v-btn depressed color="primary" class="mb-2" @click="searchPosts(null)">Search</v-btn>
-        <div class="text-caption"><a href="https://e621.net/help/cheatsheet" target="_blank">Search help</a></div>
+    <v-row v-if="status === Status.READY" no-gutters align="center" justify="center" class="text-center">
+      <v-col cols="12">
+        <v-btn depressed color="primary" class="mr-3" @click="searchPosts(null)">Search</v-btn>
+        <v-btn text :href="Urls.E621_HELP" target="_blank">Help</v-btn>
       </v-col>
       <v-col cols="auto">
-        <v-switch v-model="sfwMode" label="SFW Mode"></v-switch>
+        <v-switch v-model="sfwMode" inset label="SFW Mode" class="text-no-wrap" @change="updateSettings"></v-switch>
       </v-col>
-      <v-col cols="auto">
-        <v-checkbox v-model="globalBlacklistOff" label="Bypass Global Blacklist"></v-checkbox>
+      <v-col cols="12" class="my-3"></v-col>
+      <v-col cols="auto" class="mx-1">
+        <v-checkbox v-model="globalBlacklistOff" label="Bypass Global Blacklist" class="text-no-wrap" @change="updateSettings"></v-checkbox>
       </v-col>
-      <v-col cols="auto">
-        <v-checkbox v-model="downloadPools" label="Download Pools"></v-checkbox>
+      <v-col cols="auto" class="mx-1">
+        <v-checkbox v-model="downloadPools" label="Download Pools" class="text-no-wrap" @change="updateSettings"></v-checkbox>
       </v-col>
     </v-row>
     <v-row v-else no-gutters align="center" justify="center" class="text-center">
@@ -50,7 +53,7 @@
         ></v-progress-linear>
         <div>{{ statusText }}</div>
       </v-col>
-      <v-col v-if="status === statusEnum.AWAITING_USER_INPUT" cols="12">
+      <v-col v-if="status === Status.AWAITING_USER_INPUT" cols="12">
         <v-card v-if="(fileCount.posts.whitelisted + fileCount.pools.whitelisted) > 0" flat tile color="transparent">
           <v-card-text class="text-h6 white--text">
             <div class="text-subtitle-1 font-weight-regular">Found {{ fileCount.posts.total }} posts</div>
@@ -96,15 +99,16 @@
           </v-card-actions>
         </v-card>
       </v-col>
-      <v-col v-else-if="status === statusEnum.DONE" cols="12">
+      <v-col v-else-if="status === Status.DONE" cols="12">
         <v-card flat tile color="transparent">
           <v-card-text class="text-h6 white--text">
             Download complete.
           </v-card-text>
           <v-card-actions>
             <v-spacer></v-spacer>
-            <v-btn text color="primary" @click="restart">Discard</v-btn>
-            <v-btn depressed color="primary" @click="generateZipFile(files, filesPools, 1)">Save</v-btn>
+            <!--- <v-btn text color="primary" @click="restart">Discard</v-btn>
+            <v-btn depressed color="primary" @click="generateZipFile(files, filesPools, 1)">Save</v-btn> --->
+            <v-btn depressed color="primary" @click="restart">Finish</v-btn>
             <v-spacer></v-spacer>
           </v-card-actions>
         </v-card>
@@ -117,7 +121,7 @@
 import Pogsix from '@/components/Pogsix.vue'
 import streamSaver from 'streamsaver'
 import '@/plugins/zip-stream.js'
-import { Urls, Status, Timer } from '@/constants.js'
+import { Urls, Status, LocalStorage, Timer } from '@/constants.js'
 
 export default {
   name: 'Core',
@@ -125,10 +129,10 @@ export default {
     Pogsix
   },
   data: () => ({
-    statusEnum: Status,
+    Urls,
+    Status,
     status: Status.READY,
     postsPerPage: 320, // There is a hard limit of 320 posts per request; as per API docs
-    sfwMode: true,
     pendingApiRequests: 0,
     search: null,
     searchResults: [],
@@ -137,9 +141,10 @@ export default {
     files: [],
     filesPools: [],
     pools: [],
-    // Preferences
+    // localStorage
+    sfwMode: true,
     globalBlacklistOff: true,
-    downloadPools: true
+    downloadPools: false
   }),
   computed: {
     statusText () {
@@ -244,9 +249,15 @@ export default {
     }
   },
   methods: {
+    updateSettings () {
+      localStorage.setItem(LocalStorage.SETTINGS + '.sfwmode', this.sfwMode)
+      localStorage.setItem(LocalStorage.SETTINGS + '.globalblacklistoff', this.globalBlacklistOff)
+      localStorage.setItem(LocalStorage.SETTINGS + '.downloadpools', this.downloadPools)
+    },
     searchPosts (fromID) {
+      if (this.search) this.search = this.search.trim()
+      if (!this.search) return
       this.status = Status.RETRIEVING_POSTS
-      this.search = this.search.trim()
 
       // Add 'rating:safe' tag to query string if SFW mode is on and tag is not included already
       if (this.sfwMode && !['rating:safe', 'rating:s'].some(term => this.search.includes(term))) {
@@ -264,9 +275,6 @@ export default {
         if (response.data.posts.length === 320) {
           this.searchPosts(response.data.posts[response.data.posts.length - 1].id)
         } else {
-          console.log(`Found ${this.searchResults.length} posts.`)
-          console.log(this.searchResults)
-
           for (let i = 0; i < this.searchResults.length; i++) {
             const fileUrl = this.searchResults[i].file.url
             if (!fileUrl) {
@@ -369,7 +377,8 @@ export default {
           this.pendingApiRequests--
         })
 
-        await Timer(200)
+        // Limit concurrent network requests to 6
+        while (this.pendingApiRequests > 6) await Timer(200)
       }
 
       // Download pools
@@ -391,7 +400,8 @@ export default {
             this.pendingApiRequests--
           })
 
-          await Timer(200)
+          // Limit concurrent network requests to 6
+          while (this.pendingApiRequests > 6) await Timer(200)
         }
       }
 
@@ -401,7 +411,6 @@ export default {
           // const filesDownloaded = this.files.length
           // const filesSkipped = this.searchResults.length - this.files.length
           // console.log(`Downloaded ${filesDownloaded}, skipped ${filesSkipped} files.`)
-
           clearInterval(completionInterval)
           this.generateZipFile(this.files, this.filesPools, 1)
         }
@@ -412,8 +421,8 @@ export default {
       const zipFileName = `e621_grabber_${zipNumber}.zip`
       const dirName = this.mainDirName
       const fileStream = streamSaver.createWriteStream(zipFileName)
-      const files = [..._files]
-      const filesPools = [..._filesPools]
+      const files = _files
+      const filesPools = _filesPools
       let zipSizeLimitExceeded = false
 
       const readableZipStream = window.ZIP({
@@ -497,6 +506,14 @@ export default {
       this.files = []
       this.filesPools = []
     }
+  },
+  created () {
+    const sfwMode = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.sfwmode'))
+    const globalBlacklistOff = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.globalblacklistoff'))
+    const downloadPools = JSON.parse(localStorage.getItem(LocalStorage.SETTINGS + '.downloadpools'))
+    this.sfwMode = sfwMode !== null ? sfwMode : true
+    this.globalBlacklistOff = globalBlacklistOff !== null ? globalBlacklistOff : true
+    this.downloadPools = downloadPools !== null ? downloadPools : false
   }
 }
 </script>
