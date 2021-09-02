@@ -1,3 +1,7 @@
+export const Headers = Object.freeze({
+  USER_AGENT: 'e621-Grabber/1.0 (by Torrafox on e621)'
+})
+
 export const Urls = Object.freeze({
   CORS_PROXY: 'https://grabber-cors-anywhere.herokuapp.com/',
   E621: 'https://e621.net/',

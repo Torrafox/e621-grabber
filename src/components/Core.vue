@@ -122,7 +122,7 @@ import Pogsix from '@/components/Pogsix.vue'
 import streamSaver from 'streamsaver'
 import * as pony from 'web-streams-polyfill/ponyfill'
 import '@/plugins/zip-stream.js'
-import { Urls, Status, LocalStorage, Timer } from '@/constants.js'
+import { Headers, Urls, Status, LocalStorage, Timer } from '@/constants.js'
 
 export default {
   name: 'Core',
@@ -266,6 +266,7 @@ export default {
     },
     searchPosts (fromID) {
       this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
+        headers: { 'User-Agent': Headers.USER_AGENT },
         params: {
           tags: this.search,
           limit: this.postsPerPage,
@@ -314,6 +315,7 @@ export default {
 
       this.pendingApiRequests++
       this.axios.get(Urls.CORS_PROXY + Urls.E621_POOLS, {
+        headers: { 'User-Agent': Headers.USER_AGENT },
         params: {
           'search[id]': poolIds.join(',')
         }
@@ -347,6 +349,7 @@ export default {
     fetchPoolPosts (poolID, fromID) {
       this.pendingApiRequests++
       this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
+        headers: { 'User-Agent': Headers.USER_AGENT },
         params: {
           tags: `pool:${poolID}`,
           limit: 320,
