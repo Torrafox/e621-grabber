@@ -1,0 +1,44 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="/e621-grabber/favicon.ico"><title>e621-grabber</title><link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:100,300,400,500,700,900"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@latest/css/materialdesignicons.min.css"><link href="/e621-grabber/css/app.c6889ce3.css" rel="preload" as="style"><link href="/e621-grabber/css/chunk-vendors.068a91a3.css" rel="preload" as="style"><link href="/e621-grabber/js/app.d1de5654.js" rel="preload" as="script"><link href="/e621-grabber/js/chunk-vendors.02b29e25.js" rel="preload" as="script"><link href="/e621-grabber/css/chunk-vendors.068a91a3.css" rel="stylesheet"><link href="/e621-grabber/css/app.c6889ce3.css" rel="stylesheet"></head><body><noscript><strong>We're sorry but e621-grabber doesn't work properly without JavaScript enabled. Please enable it to continue.</strong></noscript><script>function get_browser() {
+        var ua = navigator.userAgent, tem, M = ua.match(/(opera|chrome|safari|firefox|msie|trident(?=\/))\/?\s*(\d+)/i) || [];
+        if (/trident/i.test(M[1])) {
+          tem = /\brv[ :]+(\d+)/g.exec(ua) || [];
+          return { name: 'IE', version: (tem[1] || '') };
+        }
+        if (M[1] === 'Chrome') {
+          tem = ua.match(/\bOPR\/(\d+)/)
+          if (tem != null) { return { name: 'Opera', version: tem[1] }; }
+        }
+        if (window.navigator.userAgent.indexOf("Edge") > -1) {
+          tem = ua.match(/\Edge\/(\d+)/)
+          if (tem != null) { return { name: 'Edge', version: tem[1] }; }      
+        }
+        M = M[2] ? [M[1], M[2]] : [navigator.appName, navigator.appVersion, '-?'];
+        if ((tem = ua.match(/version\/(\d+)/i)) != null) { M.splice(1, 1, tem[1]); }
+        return {
+          name: M[0],
+          version: +M[1]
+        };
+      }
+ 
+      function isSupported(browser) {
+        let supported = true;
+        if ((browser.name === "MSIE" || browser.name === "IE") && browser.version <= 11) {
+          supported = false;
+        }
+        return supported;
+      }
+ 
+      if (!isSupported(get_browser())) {
+        // render unsupported message
+        document.write("<br/><img src='/e621-grabber/ie-rip.png' width='250' height='225' style='margin:auto;display:block;'>");
+        document.write("<br/><h2 align='center'>I'm so sorry,<br/>Internet Explorer passed away...</h2><br/>");
+        document.write("<br/><h3 align='center'>Their last wish for you was to find happiness with a modern browser...</h3><br/>");
+        document.write("<br/><h3 align='center'><a href='https://google.com/chrome' target='_blank' style='text-align: center;'>Download Google Chrome</a></h3><br/>");
+        document.write("<h3 align='center'><a href='https://mozilla.org/firefox/new' target='_blank' style='text-align: center;'>Download Mozilla Firefox</a></h3><br/>");
+        document.write("<h3 align='center'><a href='https://opera.com/download' target='_blank' style='text-align: center;'>Download Opera Browser</a></h3>");
+      } else {
+        // render app
+        var elem = document.createElement("div");
+        elem.setAttribute("id", "app");
+        document.body.appendChild(elem);
+      }</script><script src="/e621-grabber/js/chunk-vendors.02b29e25.js"></script><script src="/e621-grabber/js/app.d1de5654.js"></script></body></html>
