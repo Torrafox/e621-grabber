@@ -21,13 +21,13 @@
           placeholder="fav:username esix order:score"
           prepend-inner-icon="mdi-magnify"
           :disabled="status !== Status.READY"
-          @keyup.enter.prevent="searchPosts(null)"
+          @keyup.enter.prevent="initSearch"
         ></v-text-field>
       </v-col>
     </v-row>
     <v-row v-if="status === Status.READY" no-gutters align="center" justify="center" class="text-center">
       <v-col cols="12">
-        <v-btn depressed color="primary" class="mr-3" @click="searchPosts(null)">Search</v-btn>
+        <v-btn depressed color="primary" class="mr-3" @click="initSearch">Search</v-btn>
         <v-btn text :href="Urls.E621_HELP" target="_blank">Help</v-btn>
       </v-col>
       <v-col cols="auto">
@@ -67,7 +67,7 @@
             </span>
           </v-card-text>
           <v-card-text v-if="downloadPools" class="text-h6 white--text">
-            <div class="text-subtitle-1 font-weight-regular">Detected {{ fileCount.pools.total }} posts in {{ pools.length }} pools</div>
+            <div class="text-subtitle-1 font-weight-regular">Detected {{ pools.length }} pools with {{ fileCount.pools.total }} posts</div>
             <span class="mr-2 success--text">
               <v-icon color="success">mdi-check</v-icon>
               {{ fileCount.pools.whitelisted }}
@@ -188,11 +188,7 @@ export default {
     },
     searchResultsFiltered () {
       const filtered = this.searchResults.filter(v => {
-        if (this.globalBlacklistOff) {
-          return true
-        } else {
-          return !!v.file.url
-        }
+        return !v.file.skipDownload && (this.globalBlacklistOff || !!v.file.url)
       })
       return filtered
     },
@@ -255,17 +251,21 @@ export default {
       localStorage.setItem(LocalStorage.SETTINGS + '.globalblacklistoff', this.globalBlacklistOff)
       localStorage.setItem(LocalStorage.SETTINGS + '.downloadpools', this.downloadPools)
     },
-    searchPosts (fromID) {
+    initSearch () {
       if (this.search) this.search = this.search.trim()
-      if (!this.search) return
-      this.status = Status.RETRIEVING_POSTS
+      if (this.search) {
+        this.status = Status.RETRIEVING_POSTS
 
-      // Add 'rating:safe' tag to query string if SFW mode is on and tag is not included already
-      if (this.sfwMode && !['rating:safe', 'rating:s'].some(term => this.search.includes(term))) {
-        this.search += ' rating:safe'
+        // Add 'rating:safe' tag to query string if SFW mode is on and tag is not included already
+        if (this.sfwMode && !['rating:safe', 'rating:s'].some(term => this.search.includes(term))) {
+          this.search += ' rating:safe'
+        }
+
+        this.searchPosts(null)
       }
-
-      this.axios.get(Urls.E621_POSTS, {
+    },
+    searchPosts (fromID) {
+      this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
         params: {
           tags: this.search,
           limit: this.postsPerPage,
@@ -301,7 +301,10 @@ export default {
       const poolIds = []
       for (let i = 0; i < this.searchResults.length; i++) {
         const pools = this.searchResults[i].pools
-        pools.forEach(id => poolIds.indexOf(id) === -1 && poolIds.push(id))
+        if (pools.length > 0) {
+          pools.forEach(id => poolIds.indexOf(id) === -1 && poolIds.push(id))
+          this.$set(this.searchResults[i].file, 'skipDownload', true)
+        }
       }
 
       if (poolIds.length === 0) {
@@ -310,44 +313,27 @@ export default {
       }
 
       this.pendingApiRequests++
-      this.axios.get(Urls.E621_POOLS, {
+      this.axios.get(Urls.CORS_PROXY + Urls.E621_POOLS, {
         params: {
           'search[id]': poolIds.join(',')
         }
       }).then(response => {
         this.poolsDetected = response.data.length
-        this.fetchPoolPosts(response.data)
+        // this.fetchPoolPosts(response.data)
+        this.prepareFetchPoolPosts(response.data)
       }).catch(error => {
         console.log(error)
       }).then(() => {
         this.pendingApiRequests--
       })
     },
-    async fetchPoolPosts (data) {
+    async prepareFetchPoolPosts (poolMetadata) {
       this.status = Status.RETRIEVING_POOL_POSTS
 
-      for (let i = 0; i < data.length; i++) {
-        this.pendingApiRequests++
-        this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
-          params: {
-            tags: `pool:${data[i].id}`,
-            limit: 320
-          }
-        }).then(response2 => {
-          for (let j = 0; j < response2.data.posts.length; j++) {
-            const fileUrl = response2.data.posts[j].file.url
-            if (!fileUrl) {
-              this.$set(response2.data.posts[j].file, 'constructedUrl', this.constructSourceUrl(response2.data.posts[j]))
-            }
-          }
-          this.pools.push({ pool: data[i], posts: response2.data.posts })
-        }).catch(error => {
-          console.log(error)
-        }).then(() => {
-          this.pendingApiRequests--
-        })
-
-        await Timer(200)
+      for (let i = 0; i < poolMetadata.length; i++) {
+        this.pools.push({ pool: poolMetadata[i], posts: [] })
+        this.fetchPoolPosts(poolMetadata[i].id, null)
+        await Timer(500) // As per API docs: "E621/E926 have a hard rate limit of two requests per second."
       }
 
       // Every second, check if all api requests completed
@@ -357,6 +343,34 @@ export default {
           this.status = Status.AWAITING_USER_INPUT
         }
       }, 1000)
+    },
+    fetchPoolPosts (poolID, fromID) {
+      this.pendingApiRequests++
+      this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
+        params: {
+          tags: `pool:${poolID}`,
+          limit: 320,
+          ...(fromID ? { page: `b${fromID}` } : {})
+        }
+      }).then(response2 => {
+        let targetPool = this.pools.find(p => p.pool.id === poolID)
+        targetPool.posts = [...targetPool.posts, ...response2.data.posts]
+
+        if (response2.data.posts.length === 320) {
+          this.fetchPoolPosts(poolID, response2.data.posts[response2.data.posts.length - 1].id)
+        } else {
+          for (let j = 0; j < targetPool.posts.length; j++) {
+            const fileUrl = targetPool.posts[j].file.url
+            if (!fileUrl) {
+              this.$set(targetPool.posts[j].file, 'constructedUrl', this.constructSourceUrl(targetPool.posts[j]))
+            }
+          }
+        }
+      }).catch(error => {
+        console.log(error)
+      }).then(() => {
+        this.pendingApiRequests--
+      })
     },
     async download () {
       this.status = Status.DOWNLOADING
@@ -378,8 +392,8 @@ export default {
           this.pendingApiRequests--
         })
 
-        // Limit concurrent network requests to 6
-        while (this.pendingApiRequests > 6) await Timer(200)
+        // Limit concurrent network requests to 5
+        while (this.pendingApiRequests > 5) await Timer(200)
       }
 
       // Download pools
@@ -401,8 +415,8 @@ export default {
             this.pendingApiRequests--
           })
 
-          // Limit concurrent network requests to 6
-          while (this.pendingApiRequests > 6) await Timer(200)
+          // Limit concurrent network requests to 5
+          while (this.pendingApiRequests > 5) await Timer(200)
         }
       }
 
