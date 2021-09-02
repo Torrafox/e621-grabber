@@ -351,7 +351,7 @@ export default {
       this.axios.get(Urls.CORS_PROXY + Urls.E621_POSTS, {
         headers: { 'User-Agent': Headers.USER_AGENT },
         params: {
-          tags: `pool:${poolID}`,
+          tags: `pool:${poolID}${this.sfwMode ? ' rating:safe' : ''}`,
           limit: 320,
           ...(fromID ? { page: `b${fromID}` } : {})
         }
